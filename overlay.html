@@ -88,6 +88,14 @@ let handleAngVel = 0;
 let fgState = { className: '', title: '', procName: '', app: '', ime: 'en' };
 let lastProbe = 0;
 let showStatusBadge = true; // overridden by settings
+let badgeLang = 'en';       // UI language for the status badge labels
+// Foreground-status badge labels, localized to the UI language.
+const BADGE_I18N = {
+  en:     { fg: 'Foreground', ime: 'IME', unknown: 'unknown window', zhIme: 'Chinese' },
+  zh:     { fg: '前台', ime: '输入法', unknown: '未知窗口', zhIme: '中文' },
+  'zh-TW': { fg: '前台', ime: '輸入法', unknown: '未知視窗', zhIme: '中文' },
+  ja:     { fg: '前面', ime: '入力方式', unknown: '不明なウィンドウ', zhIme: '中国語' },
+};
 
 // Lash gradient colors, derived from settings.themeColor.
 let lashColorA = '#3b82f6';
@@ -465,13 +473,14 @@ function draw() {
 /** Live foreground-status badge above the lash handle. */
 function drawStatusBadge() {
   if (!showStatusBadge || !lash || !fgState) return;
-  const imeLabel = fgState.ime === 'en' ? 'EN' : (fgState.ime === 'zh' ? '中文' : (fgState.ime || 'EN'));
-  const appName = fgState.procName || fgState.title || fgState.app || '未知窗口';
-  let line1 = `前台: ${appName}`;
+  const L = BADGE_I18N[badgeLang] || BADGE_I18N.en;
+  const imeLabel = fgState.ime === 'en' ? 'EN' : (fgState.ime === 'zh' ? L.zhIme : (fgState.ime || 'EN'));
+  const appName = fgState.procName || fgState.title || fgState.app || L.unknown;
+  let line1 = `${L.fg}: ${appName}`;
   // Truncate long app names so the badge stays readable.
   const MAX_LINE = 24;
   if (line1.length > MAX_LINE) line1 = line1.slice(0, MAX_LINE) + '…';
-  const line2 = `输入法: ${imeLabel}`;
+  const line2 = `${L.ime}: ${imeLabel}`;
 
   const px = lash[0].x;
   const py = lash[0].y;
@@ -570,21 +579,28 @@ function deriveLashColors(hex) {
 try {
   window.bridge.getSettings().then(s => {
     if (s) {
-      showStatusBadge = s.showStatusBadge !== false;
-      if (typeof s.statusPollMs === 'number' && s.statusPollMs > 0) {
-        P.statusPollMs = s.statusPollMs;
-      }
-      if (s.themeColor) {
-        const c = deriveLashColors(s.themeColor);
-        lashColorA = c.a;
-        lashColorB = c.b;
-        _badgeA = _badgeB = null; // invalidate badge accent cache
-      }
+      applySettings(s);
     }
   }).catch(() => {});
 } catch (e) {}
 
+function applySettings(s) {
+  showStatusBadge = s.showStatusBadge !== false;
+  if (BADGE_I18N[s.language]) badgeLang = s.language;
+  if (typeof s.statusPollMs === 'number' && s.statusPollMs > 0) {
+    P.statusPollMs = s.statusPollMs;
+  }
+  if (s.themeColor) {
+    const c = deriveLashColors(s.themeColor);
+    lashColorA = c.a;
+    lashColorB = c.b;
+    _badgeA = _badgeB = null; // invalidate badge accent cache
+  }
+}
+
 window.bridge.onSpawnLash(() => {
+  // Refresh settings each spawn so language/theme changes apply to the next lash.
+  try { window.bridge.getSettings().then(s => { if (s) applySettings(s); }).catch(() => {}); } catch (e) {}
   lash = spawnLash(mouseX || W / 2, mouseY || H / 2);
   dropping = false;
   prevMouseX = mouseX;

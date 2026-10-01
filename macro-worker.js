@@ -34,18 +34,23 @@ function releaseModifiers() {
   keybd_event(0x12, 0, KEYUP, 0);
 }
 
+// Switch the foreground thread to en-US so the ASCII phrase types cleanly.
+// Returns the HKL that was active *before* the switch (0 if we did not switch,
+// e.g. it was already English) so runMacro can restore it after typing.
 function switchToEnglishIME() {
   const KL_ENGLISH = 0x00000409; // en-US
   try {
+    let prevHkl = 0;
     if (GetForegroundWindow && GetWindowThreadProcessId && GetKeyboardLayout) {
       const hwnd = GetForegroundWindow();
       const tid = hwnd ? GetWindowThreadProcessId(hwnd, null) : 0;
       if (tid) {
         const hkl = GetKeyboardLayout(tid);
         const langId = Number(hkl & 0xffff);
+        prevHkl = Number(hkl);
         if (langId === 0x0409 || langId === 0x0809 || langId === 0x0c09 ||
             langId === 0x1009 || langId === 0x1409 || langId === 0x1809) {
-          return; // already English — don't disturb an in-progress composition
+          return 0; // already English — nothing to restore later
         }
       }
     }
@@ -59,8 +64,26 @@ function switchToEnglishIME() {
       const hkl = LoadKeyboardLayoutW('00000409', 0x0001 /* KLF_ACTIVATE */);
       if (hkl) ActivateKeyboardLayout(hkl, 0x0000 /* KLF_REORDER */);
     }
+    return prevHkl;
   } catch (e) {
     console.warn('switchToEnglishIME failed:', e?.message || e);
+    return 0;
+  }
+}
+
+// Put the input method back to whatever it was before the phrase was typed.
+function restoreIME(hkl) {
+  if (!hkl) return;
+  try {
+    if (GetForegroundWindow && PostMessageW) {
+      const hwnd = GetForegroundWindow();
+      if (hwnd) {
+        PostMessageW(hwnd, 0x0050 /* WM_INPUTLANGCHANGEREQUEST */, 0x1, hkl);
+      }
+    }
+    if (ActivateKeyboardLayout) ActivateKeyboardLayout(hkl, 0x0000 /* KLF_REORDER */);
+  } catch (e) {
+    console.warn('restoreIME failed:', e?.message || e);
   }
 }
 
@@ -68,8 +91,9 @@ function runMacro(text, switchEnglish) {
   releaseModifiers();
   sleepSync(20);
 
+  let prevHkl = 0;
   if (switchEnglish) {
-    switchToEnglishIME();
+    prevHkl = switchToEnglishIME();
     sleepSync(80);
   }
 
@@ -109,6 +133,12 @@ function runMacro(text, switchEnglish) {
   sleepSync(20);
 
   releaseModifiers();
+
+  // Restore the user's original input method now that the ASCII phrase is done.
+  if (prevHkl) {
+    sleepSync(40);
+    restoreIME(prevHkl);
+  }
 }
 
 parentPort.on('message', ({ text, switchEnglish }) => {
