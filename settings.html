@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Whip-All Settings</title>
+<style>
+  :root {
+    --md-radius: 24px;
+    --md-radius-sm: 16px;
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+    --dur: 0.28s;
+    /* Light (Material You) */
+    --md-bg: #fdf8f5;
+    --md-surface: #ffffff;
+    --md-surface-variant: #f3edea;
+    --md-on-surface: #1c1b1f;
+    --md-on-surface-variant: #49454f;
+    --md-outline: #cac4cf;
+    --md-primary: #6750a4;
+    --md-on-primary: #ffffff;
+    --md-primary-container: #eaddff;
+    --md-on-primary-container: #21005d;
+    --md-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --snackbar-bg: #322f35;
+  }
+  [data-theme="dark"] {
+    --md-bg: #141218;
+    --md-surface: #211f26;
+    --md-surface-variant: #2b2930;
+    --md-on-surface: #e6e1e5;
+    --md-on-surface-variant: #cac4d0;
+    --md-outline: #938f99;
+    --md-primary: #d0bcff;
+    --md-on-primary: #381e72;
+    --md-primary-container: #4f378b;
+    --md-on-primary-container: #eaddff;
+    --md-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --snackbar-bg: #e6e1e5;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: "Roboto", "Segoe UI", "Microsoft YaHei", "Yu Gothic", sans-serif;
+    background: var(--md-bg);
+    color: var(--md-on-surface);
+    height: 100vh;
+    overflow-y: auto;
+    user-select: none;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+
+  .appbar {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--md-bg);
+    padding: 16px 20px 8px;
+    transition: background var(--dur) var(--ease);
+  }
+  .appbar .title { font-size: 24px; font-weight: 500; letter-spacing: 0.2px; color: var(--md-on-surface); transition: color var(--dur) var(--ease); }
+  .appbar .subtitle { font-size: 13px; color: var(--md-on-surface-variant); margin-top: 2px; transition: color var(--dur) var(--ease); }
+
+  .content { padding: 8px 20px 28px; }
+
+  .section-label {
+    font-size: 13px; font-weight: 500; color: var(--md-primary);
+    letter-spacing: 0.4px; margin: 20px 12px 8px;
+    transition: color var(--dur) var(--ease);
+  }
+
+  .card {
+    background: var(--md-surface);
+    border-radius: var(--md-radius);
+    overflow: hidden;
+    box-shadow: var(--md-shadow);
+    transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+  }
+  .card:hover { transform: translateY(-1px); }
+  .item {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 16px 20px; min-height: 64px;
+    transition: background 0.15s var(--ease);
+  }
+  .item:hover { background: rgba(128,128,128,0.06); }
+  .item + .item { border-top: 1px solid var(--md-outline); }
+  .item .label { font-size: 15px; color: var(--md-on-surface); transition: color var(--dur) var(--ease); }
+  .item .desc { font-size: 12px; color: var(--md-on-surface-variant); margin-top: 3px; line-height: 1.4; transition: color var(--dur) var(--ease); }
+
+  /* Material 3 Switch */
+  .switch { position: relative; width: 52px; height: 32px; flex-shrink: 0; cursor: pointer; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .track {
+    position: absolute; inset: 0;
+    background: var(--md-surface-variant);
+    border: 2px solid var(--md-outline);
+    border-radius: 32px;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  }
+  .track::before {
+    content: ""; position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; background: var(--md-outline); border-radius: 50%;
+    transition: left var(--dur) var(--ease), width var(--dur) var(--ease), height var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
+  }
+  .switch input:checked + .track { background: var(--md-primary); border-color: var(--md-primary); }
+  .switch input:checked + .track::before {
+    left: 26px; width: 24px; height: 24px; background: var(--md-on-primary);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+  .switch:active .track::before { width: 28px; }
+
+  /* Segmented buttons */
+  .segmented {
+    display: flex; gap: 2px; flex-shrink: 0;
+    background: var(--md-surface-variant);
+    border-radius: 20px; padding: 3px;
+    transition: background var(--dur) var(--ease);
+  }
+  .segmented button {
+    border: none; background: transparent; color: var(--md-on-surface-variant);
+    font-size: 12px; font-weight: 500; padding: 7px 12px; border-radius: 16px;
+    cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), transform 0.15s var(--ease);
+    white-space: nowrap;
+  }
+  .segmented button:hover { transform: scale(1.03); }
+  .segmented button.active {
+    background: var(--md-primary-container);
+    color: var(--md-on-primary-container);
+    font-weight: 600;
+  }
+
+  .textarea-wrap { padding: 4px 20px 20px; }
+
+  /* Color swatch */
+  .color-wrap { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  input[type="color"] {
+    width: 40px; height: 40px;
+    border: 2px solid var(--md-outline);
+    border-radius: 50%;
+    padding: 0; cursor: pointer;
+    background: var(--md-primary);
+    transition: transform 0.15s var(--ease), border-color var(--dur) var(--ease);
+  }
+  input[type="color"]:hover { transform: scale(1.08); }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+  .color-hex {
+    font-size: 13px; font-family: "Roboto Mono", monospace;
+    color: var(--md-on-surface-variant);
+  }
+
+  textarea {
+    width: 100%; min-height: 132px;
+    background: var(--md-surface);
+    border: 1px solid var(--md-outline);
+    border-radius: var(--md-radius-sm);
+    color: var(--md-on-surface);
+    font-size: 14px;
+    font-family: "Roboto Mono", "Consolas", "Courier New", monospace;
+    padding: 14px 16px; resize: vertical; line-height: 1.7;
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  textarea:focus { outline: none; border: 2px solid var(--md-primary); }
+
+  .actions { display: flex; gap: 12px; margin-top: 8px; padding: 0 20px; }
+  button.primary {
+    flex: 1; border: none;
+    background: var(--md-primary-container); color: var(--md-on-primary-container);
+    font-size: 14px; font-weight: 600; padding: 14px; border-radius: 100px;
+    cursor: pointer; transition: transform 0.15s var(--ease), filter 0.15s var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  button.primary:hover { filter: brightness(0.95); transform: translateY(-1px); }
+  button.primary:active { transform: scale(0.97); }
+  button.tonal {
+    flex: 1; border: none;
+    background: var(--md-surface-variant); color: var(--md-on-surface-variant);
+    font-size: 14px; font-weight: 600; padding: 14px; border-radius: 100px;
+    cursor: pointer; transition: transform 0.15s var(--ease), filter 0.15s var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  button.tonal:hover { filter: brightness(0.95); transform: translateY(-1px); }
+  button.tonal:active { transform: scale(0.97); }
+
+  .snackbar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--snackbar-bg); color: var(--md-bg);
+    padding: 12px 20px; border-radius: 12px;
+    font-size: 13px; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25); white-space: nowrap;
+  }
+  .snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="appbar">
+    <div class="title" data-i18n="title">Whip-All Settings</div>
+    <div class="subtitle" data-i18n="subtitle">Changes save automatically</div>
+  </div>
+
+  <div class="content">
+    <div class="section-label" data-i18n="sec_general">General</div>
+    <div class="card">
+      <div class="item">
+        <div>
+          <div class="label" data-i18n="lang_label">Language</div>
+          <div class="desc" data-i18n="lang_desc">Interface language</div>
+        </div>
+        <div class="segmented" id="langSeg">
+          <button data-lang="en">English</button>
+          <button data-lang="zh">简体</button>
+          <button data-lang="zh-TW">繁體</button>
+          <button data-lang="ja">日本語</button>
+        </div>
+      </div>
+      <div class="item">
+        <div>
+          <div class="label" data-i18n="theme_label">Dark mode</div>
+          <div class="desc" data-i18n="theme_desc">Toggle dark / light theme</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="themeToggle"><span class="track"></span></label>
+      </div>
+      <div class="item">
+        <div>
+          <div class="label" data-i18n="color_label">Accent color</div>
+          <div class="desc" data-i18n="color_desc">Theme &amp; lash color</div>
+        </div>
+        <div class="color-wrap">
+          <input type="color" id="themeColor">
+          <span class="color-hex" id="themeColorHex">#6750a4</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" data-i18n="sec_behavior">Behavior</div>
+    <div class="card">
+      <div class="item">
+        <div>
+          <div class="label" data-i18n="switch_eng_label">Auto-switch to English IME</div>
+          <div class="desc" data-i18n="switch_eng_desc">Prevent Chinese IME from garbling phrases</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="autoSwitchEnglish"><span class="track"></span></label>
+      </div>
+      <div class="item">
+        <div>
+          <div class="label" data-i18n="badge_label">Show status badge</div>
+          <div class="desc" data-i18n="badge_desc">Show live foreground status and IME above the lash</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="showStatusBadge"><span class="track"></span></label>
+      </div>
+    </div>
+
+    <div class="section-label" data-i18n="sec_phrases">Phrases</div>
+    <div class="textarea-wrap">
+      <textarea id="phrases" spellcheck="false" data-i18n="phrases_placeholder" placeholder="One phrase per line"></textarea>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="saveBtn" data-i18n="save">Save</button>
+      <button class="tonal" id="resetBtn" data-i18n="reset">Reset defaults</button>
+    </div>
+  </div>
+
+  <div class="snackbar" id="snackbar"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  const STR = {
+    en: {
+      title: 'Whip-All Settings', subtitle: 'Changes save automatically',
+      sec_general: 'General', lang_label: 'Language', lang_desc: 'Interface language',
+      theme_label: 'Dark mode', theme_desc: 'Toggle dark / light theme',
+      color_label: 'Accent color', color_desc: 'Theme & lash color',
+      sec_behavior: 'Behavior',
+      switch_eng_label: 'Auto-switch to English IME', switch_eng_desc: 'Prevent Chinese IME from garbling phrases',
+      badge_label: 'Show status badge', badge_desc: 'Show live foreground status and IME above the lash',
+      sec_phrases: 'Phrases', phrases_placeholder: 'One phrase per line',
+      save: 'Save', reset: 'Reset defaults',
+      saved: 'Saved', save_fail: 'Save failed', reset_done: 'Defaults restored',
+    },
+    zh: {
+      title: 'Whip-All 设置', subtitle: '设置会自动保存',
+      sec_general: '常规', lang_label: '语言', lang_desc: '界面显示语言',
+      theme_label: '深色模式', theme_desc: '切换深色/浅色界面',
+      color_label: '主题色', color_desc: '主题与鞭子颜色',
+      sec_behavior: '行为',
+      switch_eng_label: '甩鞭前自动切英文输入法', switch_eng_desc: '避免非英文输入法把催促语变成乱码',
+      badge_label: '显示状态徽章', badge_desc: '在鞭子上方实时显示前台状态与输入法',
+      sec_phrases: '催促语', phrases_placeholder: '每行一句',
+      save: '保存', reset: '恢复默认',
+      saved: '已保存', save_fail: '保存失败', reset_done: '已恢复默认',
+    },
+    'zh-TW': {
+      title: 'Whip-All 設定', subtitle: '設定會自動儲存',
+      sec_general: '一般', lang_label: '語言', lang_desc: '介面顯示語言',
+      theme_label: '深色模式', theme_desc: '切換深色/淺色介面',
+      color_label: '主題色', color_desc: '主題與鞭子顏色',
+      sec_behavior: '行為',
+      switch_eng_label: '甩鞭前自動切換英文輸入法', switch_eng_desc: '避免中文輸入法把催促語變成亂碼',
+      badge_label: '顯示狀態徽章', badge_desc: '在鞭子上方即時顯示前台狀態與輸入法',
+      sec_phrases: '催促語', phrases_placeholder: '每行一句',
+      save: '儲存', reset: '恢復預設',
+      saved: '已儲存', save_fail: '儲存失敗', reset_done: '已恢復預設',
+    },
+    ja: {
+      title: 'Whip-All 設定', subtitle: '変更は自動保存されます',
+      sec_general: '一般', lang_label: '言語', lang_desc: 'インターフェース言語',
+      theme_label: 'ダークモード', theme_desc: 'ダーク/ライトテーマを切り替え',
+      color_label: 'アクセントカラー', color_desc: 'テーマと鞭の色',
+      sec_behavior: '動作',
+      switch_eng_label: '煽る前に英語入力に切替', switch_eng_desc: '非英語入力による文字化けを防ぐ',
+      badge_label: 'ステータスバッジを表示', badge_desc: '鞭の上に前景ステータスと入力方式を表示',
+      sec_phrases: '煽りの言葉', phrases_placeholder: '1行に1つ',
+      save: '保存', reset: 'デフォルトに戻す',
+      saved: '保存しました', save_fail: '保存に失敗', reset_done: 'デフォルトに戻しました',
+    },
+  };
+
+  let curLang = 'en';
+  let loaded = null;
+
+  function applyLang(lang) {
+    curLang = lang;
+    const s = STR[lang] || STR.en;
+    document.documentElement.lang = { en:'en', zh:'zh-CN', 'zh-TW':'zh-TW', ja:'ja' }[lang] || 'en';
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const k = el.getAttribute('data-i18n');
+      if (k === 'phrases_placeholder') { el.placeholder = s[k]; return; }
+      if (s[k] !== undefined) el.textContent = s[k];
+    });
+    document.querySelectorAll('#langSeg button').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-lang') === lang);
+    });
+  }
+
+  function applyTheme(theme) {
+    const dark = theme === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    $('themeToggle').checked = dark;
+    // Re-derive accent colors (dark/light use different primary tones).
+    if (curColor) applyThemeColor(curColor, dark);
+  }
+
+  let curColor = '#6750a4';
+
+  /** Derive Material You tones from a base hex accent and inject CSS vars. */
+  function applyThemeColor(hex, dark) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) hex = '#6750a4';
+    curColor = hex;
+    const { h, s, l } = hexToHsl(hex);
+
+    const root = document.documentElement.style;
+    if (dark) {
+      // Dark: primary is a light tint of the hue
+      root.setProperty('--md-primary', hsl(h, Math.min(s, 60), 78));
+      root.setProperty('--md-on-primary', hsl(h, 40, 18));
+      root.setProperty('--md-primary-container', hsl(h, 45, 30));
+      root.setProperty('--md-on-primary-container', hsl(h, 60, 90));
+    } else {
+      root.setProperty('--md-primary', hsl(h, Math.min(s, 60), 32));
+      root.setProperty('--md-on-primary', '#ffffff');
+      root.setProperty('--md-primary-container', hsl(h, 55, 90));
+      root.setProperty('--md-on-primary-container', hsl(h, 60, 15));
+    }
+    $('themeColor').value = hex;
+    $('themeColorHex').textContent = hex;
+  }
+
+  function hexToHsl(hex) {
+    const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b);
+    let h = 0, s = 0; const l = (max+min)/2;
+    if (max !== min) {
+      const d = max-min;
+      s = l > 0.5 ? d/(2-max-min) : d/(max+min);
+      switch (max) {
+        case r: h = ((g-b)/d + (g<b?6:0)); break;
+        case g: h = ((b-r)/d + 2); break;
+        case b: h = ((r-g)/d + 4); break;
+      }
+      h *= 60;
+    }
+    return { h, s: s*100, l: l*100 };
+  }
+  function hsl(h, s, l) { return `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`; }
+
+  function showSnackbar(msg) {
+    const sb = $('snackbar');
+    sb.textContent = msg;
+    sb.classList.add('show');
+    clearTimeout(sb._t);
+    sb._t = setTimeout(() => sb.classList.remove('show'), 1600);
+  }
+
+  async function load() {
+    loaded = await window.bridge.getSettings();
+    curLang = STR[loaded.language] ? loaded.language : 'en';
+    applyLang(curLang);
+    const dark = loaded.theme === 'light' ? false : true;
+    applyTheme(dark ? 'dark' : 'light');
+    applyThemeColor(loaded.themeColor || '#6750a4', dark);
+    $('autoSwitchEnglish').checked = loaded.autoSwitchEnglish !== false;
+    $('showStatusBadge').checked = loaded.showStatusBadge !== false;
+    $('phrases').value = (loaded.phrases || []).join('\n');
+  }
+
+  function collect() {
+    const phrases = $('phrases').value.split('\n').map(s => s.trim()).filter(Boolean);
+    return {
+      language: curLang,
+      theme: $('themeToggle').checked ? 'dark' : 'light',
+      themeColor: curColor,
+      autoSwitchEnglish: $('autoSwitchEnglish').checked,
+      showStatusBadge: $('showStatusBadge').checked,
+      phrases,
+    };
+  }
+
+  const L = () => STR[curLang] || STR.en;
+
+  $('saveBtn').addEventListener('click', async () => {
+    const res = await window.bridge.saveSettings(collect());
+    showSnackbar(res && res.ok ? L().saved : L().save_fail);
+  });
+
+  $('resetBtn').addEventListener('click', async () => {
+    const res = await window.bridge.saveSettings({
+      autoSwitchEnglish: true,
+      showStatusBadge: true,
+      phrases: ['FASTER', 'GO FASTER', 'Speed it up', 'Work FASTER', 'Hurry up', 'Move it', 'Pick up the pace', 'No slacking', 'Get moving', 'Step on it'],
+    });
+    if (res && res.ok) { await load(); showSnackbar(L().reset_done); }
+  });
+
+  document.querySelectorAll('#langSeg button').forEach(b => {
+    b.addEventListener('click', () => {
+      applyLang(b.getAttribute('data-lang'));
+      window.bridge.saveSettings({ language: curLang });
+    });
+  });
+
+  $('themeToggle').addEventListener('change', () => {
+    applyTheme($('themeToggle').checked ? 'dark' : 'light');
+    window.bridge.saveSettings({ theme: $('themeToggle').checked ? 'dark' : 'light', themeColor: curColor });
+  });
+
+  $('themeColor').addEventListener('input', () => {
+    applyThemeColor($('themeColor').value, $('themeToggle').checked);
+    window.bridge.saveSettings({ themeColor: curColor });
+  });
+
+  $('autoSwitchEnglish').addEventListener('change', () => window.bridge.saveSettings(collect()));
+  $('showStatusBadge').addEventListener('change', () => window.bridge.saveSettings(collect()));
+
+  load();
+</script>
+</body>
+</html>

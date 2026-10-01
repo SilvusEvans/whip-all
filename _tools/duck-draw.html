@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<canvas id="c" width="1024" height="1024"></canvas>
+<script>
+const MODE = new URLSearchParams(location.search).get('mode') || 'color';
+const ctx = document.getElementById('c').getContext('2d');
+
+function paint(main, opts) {
+  const { bg, body, beak, dark, outline } = opts;
+  const S = 1024;
+
+  if (bg) {
+    ctx.fillStyle = bg;
+    roundRect(ctx, 0, 0, S, S, 220);
+    ctx.fill();
+  } else {
+    ctx.clearRect(0, 0, S, S);
+  }
+
+  const fill = c => { ctx.fillStyle = c; ctx.fill(); };
+
+  // tail (up-right flick)
+  ctx.beginPath();
+  ctx.moveTo(700, 640);
+  ctx.quadraticCurveTo(880, 560, 900, 420);
+  ctx.quadraticCurveTo(820, 500, 760, 520);
+  ctx.quadraticCurveTo(740, 580, 700, 640);
+  ctx.closePath();
+  fill(main ? main.body : dark);
+
+  // body
+  ctx.beginPath();
+  ctx.ellipse(512, 680, 330, 230, 0, 0, Math.PI * 2);
+  fill(main ? main.body : dark);
+
+  // neck + head
+  ctx.beginPath();
+  ctx.moveTo(330, 600);
+  ctx.quadraticCurveTo(280, 420, 330, 300);
+  ctx.arc(420, 260, 175, Math.PI * 0.75, Math.PI * 1.9);
+  ctx.quadraticCurveTo(640, 380, 620, 620);
+  ctx.closePath();
+  fill(main ? main.body : dark);
+
+  // beak
+  ctx.beginPath();
+  ctx.moveTo(275, 250);
+  ctx.quadraticCurveTo(120, 270, 110, 330);
+  ctx.quadraticCurveTo(170, 380, 300, 350);
+  ctx.closePath();
+  fill(main ? main.beak : dark);
+
+  if (main) {
+    // angry eyebrow
+    ctx.strokeStyle = main.ink;
+    ctx.lineWidth = 26;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(360, 175);
+    ctx.lineTo(480, 215);
+    ctx.stroke();
+    // eye
+    ctx.beginPath();
+    ctx.arc(420, 250, 34, 0, Math.PI * 2);
+    fill(main.ink);
+    // wing
+    ctx.strokeStyle = main.wing;
+    ctx.lineWidth = 34;
+    ctx.beginPath();
+    ctx.ellipse(520, 700, 150, 90, -0.2, 0.3, Math.PI * 1.6);
+    ctx.stroke();
+  }
+
+  // lash: held up-right, curved tip
+  const lash = main ? main.ink : dark;
+  ctx.strokeStyle = lash;
+  ctx.lineWidth = main ? 26 : 30;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(640, 560);
+  ctx.quadraticCurveTo(760, 360, 950, 250);
+  ctx.stroke();
+  ctx.lineWidth = main ? 44 : 46;
+  ctx.beginPath();
+  ctx.moveTo(620, 585);
+  ctx.lineTo(670, 540);
+  ctx.stroke();
+  // spark at tip
+  ctx.lineWidth = main ? 18 : 22;
+  ctx.beginPath();
+  ctx.moveTo(930, 150); ctx.lineTo(975, 120);
+  ctx.moveTo(960, 210); ctx.lineTo(1010, 195);
+  ctx.moveTo(880, 140); ctx.lineTo(895, 90);
+  ctx.stroke();
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+ctx.lineJoin = 'round';
+if (MODE === 'silhouette') {
+  paint(null, { bg: null, body: null, beak: null, dark: '#000000', outline: null });
+} else {
+  paint(
+    { body: '#ffd23f', beak: '#ff8f1f', ink: '#241a3d', wing: '#e0a800' },
+    { bg: '#6750a4' }
+  );
+}
+window.__done = true;
+</script>
+</html>

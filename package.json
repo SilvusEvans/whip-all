@@ -1,12 +1,11 @@
 {
-  "name": "openwhip",
+  "name": "whipall",
   "version": "1.1.0",
-  "description": "Whip Claude into shape",
+  "description": "Nudge slow tools into gear (a.k.a. Whip-All)",
   "license": "MIT",
   "main": "main.js",
   "bin": {
-    "openwhip": "bin/openwhip.js",
-    "badclaude": "bin/openwhip.js"
+    "whipall": "bin/whipall.js"
   },
   "os": [
     "darwin",
@@ -20,7 +19,8 @@
     "electron",
     "tray",
     "overlay",
-    "cli"
+    "cli",
+    "productivity"
   ],
   "repository": {
     "type": "git",
@@ -34,10 +34,10 @@
     "main.js",
     "preload.js",
     "overlay.html",
+    "settings.html",
     "sounds",
     "icon",
-    "bin/openwhip.js",
-    "bin/badclaude.js",
+    "bin/whipall.js",
     "README.md"
   ],
   "scripts": {

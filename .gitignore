@@ -2,3 +2,7 @@ node_modules/
 dist/
 out/
 *.tgz
+/_*.js
+/_*.txt
+.workbuddy-ai/
+icon/backup-old/
