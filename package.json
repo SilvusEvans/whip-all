@@ -24,14 +24,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GitFrog1111/OpenWhip.git"
+    "url": "git+https://github.com/SilvusEvans/whip-all.git"
   },
   "bugs": {
-    "url": "https://github.com/GitFrog1111/OpenWhip/issues"
+    "url": "https://github.com/SilvusEvans/whip-all/issues"
   },
-  "homepage": "https://github.com/GitFrog1111/OpenWhip#readme",
+  "homepage": "https://github.com/SilvusEvans/whip-all#readme",
   "files": [
     "main.js",
+    "macro-worker.js",
     "preload.js",
     "overlay.html",
     "settings.html",

@@ -3,11 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
+const { Worker } = require('worker_threads');
 
 // ── Win32 FFI (Windows only) ────────────────────────────────────────────────
 let koffi;
-let keybd_event, VkKeyScanA;
-let GetForegroundWindow, PostMessageW, LoadKeyboardLayoutW, ActivateKeyboardLayout;
+let keybd_event;
+let GetForegroundWindow;
 let GetWindowThreadProcessId, OpenProcess, GetClassNameW, GetKeyboardLayout;
 let GetWindowTextW, QueryFullProcessImageNameW, CloseHandle;
 let SetForegroundWindow;
@@ -19,11 +20,7 @@ if (process.platform === 'win32') {
     const user32 = koffi.load('user32.dll');
     kernel32 = koffi.load('kernel32.dll');
     keybd_event = user32.func('void __stdcall keybd_event(uint8_t bVk, uint8_t bScan, uint32_t dwFlags, uintptr_t dwExtraInfo)');
-    VkKeyScanA = user32.func('int16_t __stdcall VkKeyScanA(int ch)');
     GetForegroundWindow = user32.func('uintptr_t __stdcall GetForegroundWindow()');
-    PostMessageW = user32.func('int __stdcall PostMessageW(uintptr_t hWnd, uint32_t Msg, uintptr_t wParam, intptr_t lParam)');
-    LoadKeyboardLayoutW = user32.func('uintptr_t __stdcall LoadKeyboardLayoutW(str pwszKLID, uint32_t Flags)');
-    ActivateKeyboardLayout = user32.func('uintptr_t __stdcall ActivateKeyboardLayout(uintptr_t HKL, uint32_t Flags)');
     GetWindowThreadProcessId = user32.func('uint32_t __stdcall GetWindowThreadProcessId(uintptr_t hWnd, void* lpdwProcessId)');
     GetClassNameW = user32.func('int __stdcall GetClassNameW(uintptr_t hWnd, void* lpClassName, int nMaxCount)');
     GetKeyboardLayout = user32.func('uintptr_t __stdcall GetKeyboardLayout(uint32_t idThread)');
@@ -125,15 +122,13 @@ function saveSettings() {
 }
 
 const VK_CONTROL = 0x11;
-const VK_RETURN  = 0x0D;
-const VK_C       = 0x43;
 const VK_MENU    = 0x12; // Alt
 const VK_TAB     = 0x09;
-const VK_SHIFT   = 0x10;
 const KEYUP      = 0x0002;
 
-/** Blocking sleep. Keystrokes are sent back-to-back, so we need real gaps for
- *  the target app (and the IME) to actually process them. */
+/** Blocking sleep. Used by the Alt+Tab fallback in refocusPreviousApp; the
+ *  keystroke macro itself runs in macro-worker.js so the main loop stays free
+ *  to keep feeding cursor positions to the whip while it types. */
 function sleepSync(ms) {
   try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -142,15 +137,6 @@ function sleepSync(ms) {
     const end = Date.now() + ms;
     while (Date.now() < end) { /* spin */ }
   }
-}
-
-/** Release any modifier stuck down from an earlier macro / Alt+Tab.
- *  A stuck Alt turns the user's own typing into Alt+key garbage. */
-function releaseModifiers() {
-  if (!keybd_event) return;
-  keybd_event(VK_CONTROL, 0, KEYUP, 0);
-  keybd_event(VK_SHIFT, 0, KEYUP, 0);
-  keybd_event(VK_MENU, 0, KEYUP, 0);
 }
 
 /** Restore focus to the app the user was in before the overlay appeared.
@@ -549,115 +535,32 @@ function probeForegroundState() {
 }
 
 // ── Macro: immediate Ctrl+C, type a phrase, Enter ────────────────────
+// The keystrokes are executed by macro-worker.js in a worker thread so the
+// main process (cursor polling / whip animation) never blocks on sleepSync.
+let macroWorker = null;
+function getMacroWorker() {
+  if (!macroWorker) {
+    macroWorker = new Worker(path.join(__dirname, 'macro-worker.js'));
+    macroWorker.on('error', err => {
+      console.warn('macro worker error:', err?.message || err);
+      macroWorker = null;
+    });
+  }
+  return macroWorker;
+}
+
 function sendMacro() {
   // Pick a random phrase from the configured list and type it out
   const phrases = settings.phrases || DEFAULT_SETTINGS.phrases;
   const chosen = phrases[Math.floor(Math.random() * phrases.length)];
 
   if (process.platform === 'win32') {
-    sendMacroWindows(chosen, settings.autoSwitchEnglish !== false);
+    getMacroWorker().postMessage({ text: chosen, switchEnglish: settings.autoSwitchEnglish !== false });
   } else if (process.platform === 'darwin') {
     sendMacroMac(chosen);
   } else if (process.platform === 'linux') {
     sendMacroLinux(chosen);
   }
-}
-
-/** Switch the foreground window's input method to English (US) before typing.
- *  Handles both the IME (Chinese input via WM_INPUTLANGCHANGEREQUEST) and the
- *  keyboard layout (via ActivateKeyboardLayout).
- *
- *  IMPORTANT: switching the layout while the user is mid-composition flushes
- *  whatever they were typing as garbage (e.g. "run" -> "r;n").
- *  So we skip the switch when the layout is already English — no need to churn
- *  the IME, and we never disturb an in-progress composition unnecessarily. */
-function switchToEnglishIME() {
-  if (process.platform !== 'win32') return;
-  const KL_ENGLISH = 0x00000409; // en-US
-  try {
-    // Skip if the foreground thread is already on an English layout.
-    if (GetForegroundWindow && GetWindowThreadProcessId && GetKeyboardLayout) {
-      const hwnd = GetForegroundWindow();
-      const tid = hwnd ? GetWindowThreadProcessId(hwnd, null) : 0;
-      if (tid) {
-        const hkl = GetKeyboardLayout(tid);
-        const langId = Number(hkl & 0xffff);
-        // 0x0409 = en-US, 0x0809 = en-GB, 0x0409-family also covers en-AU etc.
-        if (langId === 0x0409 || langId === 0x0809 || langId === 0x0c09 ||
-            langId === 0x1009 || langId === 0x1409 || langId === 0x1809) {
-          return; // already English — do nothing, don't disturb the user
-        }
-      }
-    }
-    // 1) Ask the foreground window to change its input language to en-US.
-    if (GetForegroundWindow && PostMessageW) {
-      const hwnd = GetForegroundWindow();
-      if (hwnd) {
-        PostMessageW(hwnd, 0x0050 /* WM_INPUTLANGCHANGEREQUEST */, 0x1 /* INPUTLANGCHANGE_SYSCHARSET */, KL_ENGLISH);
-      }
-    }
-    // 2) Activate the en-US keyboard layout globally for this thread.
-    if (LoadKeyboardLayoutW && ActivateKeyboardLayout) {
-      const hkl = LoadKeyboardLayoutW('00000409', 0x0001 /* KLF_ACTIVATE */);
-      if (hkl) ActivateKeyboardLayout(hkl, 0x0000 /* KLF_REORDER */);
-    }
-  } catch (e) {
-    console.warn('switchToEnglishIME failed:', e?.message || e);
-  }
-}
-
-function sendMacroWindows(text, switchEnglish) {
-  if (!keybd_event || !VkKeyScanA) return;
-
-  // 0) Clear any modifier left stuck by a previous macro or Alt+Tab.
-  releaseModifiers();
-  sleepSync(20);
-
-  // 1) Switch IME first, then wait for the layout change to settle.
-  //    (Switching while the user is mid-composition used to flush their
-  //     half-typed word as garbage — the wait lets it commit cleanly.)
-  if (switchEnglish) {
-    switchToEnglishIME();
-    sleepSync(80);
-  }
-
-  const tapKey = vk => {
-    keybd_event(vk, 0, 0, 0);
-    sleepSync(10);
-    keybd_event(vk, 0, KEYUP, 0);
-    sleepSync(10);
-  };
-  const tapChar = ch => {
-    const packed = VkKeyScanA(ch.charCodeAt(0));
-    if (packed === -1) return;
-    const vk = packed & 0xff;
-    const shiftState = (packed >> 8) & 0xff;
-    if (shiftState & 1) keybd_event(VK_SHIFT, 0, 0, 0); // Shift down
-    sleepSync(8);
-    tapKey(vk);
-    if (shiftState & 1) keybd_event(VK_SHIFT, 0, KEYUP, 0); // Shift up
-    sleepSync(8);
-  };
-
-  // Ctrl+C (interrupt)
-  keybd_event(VK_CONTROL, 0, 0, 0);
-  sleepSync(15);
-  keybd_event(VK_C, 0, 0, 0);
-  sleepSync(15);
-  keybd_event(VK_C, 0, KEYUP, 0);
-  sleepSync(15);
-  keybd_event(VK_CONTROL, 0, KEYUP, 0);
-  sleepSync(60);
-
-  for (const ch of text) tapChar(ch);
-  sleepSync(40);
-  keybd_event(VK_RETURN, 0, 0, 0);
-  sleepSync(15);
-  keybd_event(VK_RETURN, 0, KEYUP, 0);
-  sleepSync(20);
-
-  // Final safety net: never leave a modifier down for the user's own typing.
-  releaseModifiers();
 }
 
 function sendMacroMac(text) {
