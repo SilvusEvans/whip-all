@@ -47,20 +47,80 @@ let lastUserHwnd = 0; // foreground window before the overlay took over
 // ── Crack overlay session state ─────────────────────────────────────────────
 // The overlay is a fully transparent, click-through window. Because it no longer
 // paints an opaque fill, it cannot receive DOM mouse events, so we feed it the
-// cursor position from the main process. The lash is dropped via Ctrl+Q or the
-// tray icon, not by clicking the screen.
+// cursor position from the main process. The lash is dropped via the quit hotkey
+// or the tray icon, not by clicking the screen.
 let cursorTimer = null;        // lightweight cursor-poll timer
 let overlayOffset = { x: 0, y: 0 }; // overlay window's screen origin (for cursor mapping)
 
-// Keyboard hook for Ctrl+Q (Windows only), installed for the app's whole
-// lifetime: while the lash is on screen Ctrl+Q drops it; otherwise
-// Ctrl+Q quits the app. Both cases consume the key so it never leaks into
+// Keyboard hook for the quit hotkey (Windows only), installed for the app's
+// whole lifetime: while the lash is on screen the hotkey drops it; otherwise
+// the hotkey quits the app. Both cases consume the key so it never leaks into
 // the foreground application.
 let kbHookHandle = 0;        // WH_KEYBOARD_LL hook handle (0 = not installed)
 let kbHookCbRef = null;       // keeps the registered JS callback alive
-const VK_Q = 0x51;
+let hotkeyCapture = false;    // settings window is recording a new quit hotkey
+const VK_SHIFT = 0x10;
 const WH_KEYBOARD_LL = 13;
 const WM_KEYDOWN = 0x0100;
+
+// ── Quit hotkey ─────────────────────────────────────────────────────────────
+// Stored as `{ ctrl, alt, shift, code }` (`code` = a KeyboardEvent.code, so the
+// settings window can record it from a keydown without knowing VK numbers).
+// This table is the single source of truth mapping that code to the Win32 VK the
+// low-level hook reports and to the label shown in the UI; the settings window
+// validates a recording through IPC instead of keeping its own copy, so the two
+// can never drift apart.
+const DEFAULT_QUIT_HOTKEY = { ctrl: true, alt: false, shift: false, code: 'KeyQ' };
+
+const HOTKEY_KEYS = (() => {
+  const map = {};
+  for (let i = 0; i < 26; i++) {
+    const ch = String.fromCharCode(65 + i);
+    map['Key' + ch] = { vk: 0x41 + i, label: ch };
+  }
+  for (let d = 0; d < 10; d++) {
+    map['Digit' + d] = { vk: 0x30 + d, label: String(d) };
+    map['Numpad' + d] = { vk: 0x60 + d, label: 'Num' + d };
+  }
+  for (let f = 1; f <= 12; f++) map['F' + f] = { vk: 0x6f + f, label: 'F' + f };
+  Object.assign(map, {
+    ArrowUp: { vk: 0x26, label: 'Up' },      ArrowDown: { vk: 0x28, label: 'Down' },
+    ArrowLeft: { vk: 0x25, label: 'Left' },  ArrowRight: { vk: 0x27, label: 'Right' },
+    Home: { vk: 0x24, label: 'Home' },       End: { vk: 0x23, label: 'End' },
+    PageUp: { vk: 0x21, label: 'PageUp' },   PageDown: { vk: 0x22, label: 'PageDown' },
+    Space: { vk: 0x20, label: 'Space' },     Enter: { vk: 0x0d, label: 'Enter' },
+    NumpadEnter: { vk: 0x0d, label: 'NumEnter' }, Escape: { vk: 0x1b, label: 'Esc' },
+    Tab: { vk: 0x09, label: 'Tab' },         Backspace: { vk: 0x08, label: 'Bksp' },
+    Semicolon: { vk: 0xba, label: ';' },     Equal: { vk: 0xbb, label: '=' },
+    Comma: { vk: 0xbc, label: ',' },         Minus: { vk: 0xbd, label: '-' },
+    Period: { vk: 0xbe, label: '.' },        Slash: { vk: 0xbf, label: '/' },
+    Backquote: { vk: 0xc0, label: '`' },     BracketLeft: { vk: 0xdb, label: '[' },
+    Backslash: { vk: 0xdc, label: '\\' },    BracketRight: { vk: 0xdd, label: ']' },
+    Quote: { vk: 0xde, label: "'" },
+    NumpadMultiply: { vk: 0x6a, label: 'Num*' }, NumpadAdd: { vk: 0x6b, label: 'Num+' },
+    NumpadSubtract: { vk: 0x6d, label: 'Num-' }, NumpadDecimal: { vk: 0x6e, label: 'Num.' },
+    NumpadDivide: { vk: 0x6f, label: 'Num/' },
+  });
+  return map;
+})();
+
+/** Accept only a known key plus at least one modifier: a bare key would be
+ *  swallowed everywhere on the desktop (a modifier-less "Q" means no typing). */
+function normalizeHotkey(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const code = typeof raw.code === 'string' ? raw.code : '';
+  if (!HOTKEY_KEYS[code]) return null;
+  const hk = { ctrl: !!raw.ctrl, alt: !!raw.alt, shift: !!raw.shift, code };
+  if (!hk.ctrl && !hk.alt && !hk.shift) return null;
+  return hk;
+}
+
+function hotkeyLabel(raw) {
+  const hk = normalizeHotkey(raw) || DEFAULT_QUIT_HOTKEY;
+  return [hk.ctrl && 'Ctrl', hk.alt && 'Alt', hk.shift && 'Shift', HOTKEY_KEYS[hk.code].label]
+    .filter(Boolean)
+    .join('+');
+}
 
 // ── Settings ────────────────────────────────────────────────────────────────
 const SETTINGS_FILE = path.join(os.homedir(), '.whipall.json');
@@ -71,6 +131,8 @@ const DEFAULT_SETTINGS = {
   autoSwitchEnglish: true,   // switch IME to English before cracking
   showStatusBadge: true,     // show live foreground status badge above the lash
   statusPollMs: 300,         // how often to poll foreground state (ms)
+  quitHotkey: { ...DEFAULT_QUIT_HOTKEY }, // drop the lash / quit the app
+  firstRunHintDone: false,   // one-off tray hint telling the user the hotkey
   phrases: [
     'FASTER',
     'GO FASTER',
@@ -88,10 +150,18 @@ let settings = { ...DEFAULT_SETTINGS };
 
 // UI strings, keyed by language.
 const I18N = {
-  en:    { settings: 'Settings', quit: 'Quit', tooltip: 'Whip-All - click to crack', title: 'Whip-All Settings' },
-  zh:    { settings: '设置', quit: '退出', tooltip: 'Whip-All - 点击挥鞭', title: 'Whip-All 设置' },
-  'zh-TW': { settings: '設定', quit: '退出', tooltip: 'Whip-All - 點擊揮鞭', title: 'Whip-All 設定' },
-  ja:    { settings: '設定', quit: '終了', tooltip: 'Whip-All - クリックで煽る', title: 'Whip-All 設定' },
+  en:    { settings: 'Settings', quit: 'Quit', tooltip: 'Whip-All - click to crack', title: 'Whip-All Settings',
+           hint_title: 'Whip-All is running',
+           hint_body: 'Click the tray icon to summon the whip. Press {hotkey} to drop the lash, or quit the app when no lash is on screen.' },
+  zh:    { settings: '设置', quit: '退出', tooltip: 'Whip-All - 点击挥鞭', title: 'Whip-All 设置',
+           hint_title: 'Whip-All 已启动',
+           hint_body: '点击托盘图标召唤鞭子。按 {hotkey} 放下鞭子；屏幕上没有鞭子时按它会退出程序。' },
+  'zh-TW': { settings: '設定', quit: '退出', tooltip: 'Whip-All - 點擊揮鞭', title: 'Whip-All 設定',
+           hint_title: 'Whip-All 已啟動',
+           hint_body: '點擊托盤圖標召喚鞭子。按 {hotkey} 放下鞭子；螢幕上沒有鞭子時按它會退出程式。' },
+  ja:    { settings: '設定', quit: '終了', tooltip: 'Whip-All - クリックで煽る', title: 'Whip-All 設定',
+           hint_title: 'Whip-All 起動中',
+           hint_body: 'トレイアイコンをクリックで鞭を出します。{hotkey} で鞭を下げます。鞭がないときは終了します。' },
 };
 function t(key) {
   const lang = I18N[settings.language] ? settings.language : 'en';
@@ -106,6 +176,7 @@ function loadSettings() {
       if (!Array.isArray(settings.phrases) || settings.phrases.length === 0) {
         settings.phrases = DEFAULT_SETTINGS.phrases;
       }
+      settings.quitHotkey = normalizeHotkey(settings.quitHotkey) || { ...DEFAULT_QUIT_HOTKEY };
     }
   } catch (e) {
     console.warn('loadSettings failed:', e?.message || e);
@@ -193,7 +264,7 @@ function refocusPreviousApp() {
 // ── Lash overlay session: cursor feed ───────────────────────────────────────
 // The overlay is transparent & click-through, so it can't read the mouse itself.
 // The main process polls the cursor and feeds it to the lash so it stays glued
-// to the pointer. Dropping the lash: Ctrl+Q (keyboard hook) or the tray icon.
+// to the pointer. Dropping the lash: the quit hotkey (keyboard hook) or the tray icon.
 
 function getCursorNow() {
   try {
@@ -203,9 +274,9 @@ function getCursorNow() {
   }
 }
 
-// Low-level keyboard hook for Ctrl+Q, installed once at startup. While the
-// lash overlay is visible Ctrl+Q drops the lash; otherwise it quits the app.
-// Both cases consume the key so it never leaks into the foreground app.
+// Low-level keyboard hook for the quit hotkey, installed once at startup. While
+// the lash overlay is visible the hotkey drops the lash; otherwise it quits the
+// app. Both cases consume the key so it never leaks into the foreground app.
 function installKeyboardHook() {
   if (process.platform !== 'win32' || !SetWindowsHookExW || kbHookHandle) return;
   try {
@@ -221,19 +292,23 @@ function installKeyboardHook() {
           if (flags & 0x10) return CallNextHookEx(kbHookHandle, nCode, wParam, kbPtr);
         }
         const vk = (nCode >= 0 && kbPtr) ? koffi.decode(kbPtr, 'uint32_t') : -1;
-        if (vk === VK_Q && nCode >= 0 && wParam === WM_KEYDOWN) {
-          // Only fire when Ctrl is actually held (check live key state).
-          const ctrlDown = GetAsyncKeyState ? (GetAsyncKeyState(VK_CONTROL) & 0x8000) : 0;
-          if (ctrlDown) {
+        const hk = settings.quitHotkey || DEFAULT_QUIT_HOTKEY;
+        const wanted = HOTKEY_KEYS[hk.code];
+        // hotkeyCapture: the settings window is recording a new combination, so the
+        // current one must behave like a normal key and reach that window.
+        if (!hotkeyCapture && wanted && nCode >= 0 && wParam === WM_KEYDOWN && vk === wanted.vk) {
+          // Match the modifier state exactly (live key state, not the event's).
+          const down = v => GetAsyncKeyState ? (GetAsyncKeyState(v) & 0x8000) !== 0 : false;
+          if (down(VK_CONTROL) === hk.ctrl && down(VK_MENU) === hk.alt && down(VK_SHIFT) === hk.shift) {
             if (overlay && overlay.isVisible() && !overlay.isDestroyed()) {
-              // Lash on screen: Ctrl+Q drops it. Overlay ignores this if it is
-              // already dropping, so a repeated Ctrl+Q is harmless.
+              // Lash on screen: the hotkey drops it. Overlay ignores this if it
+              // is already dropping, so a repeated press is harmless.
               overlay.webContents.send('cursor-down');
             } else {
-              // No lash: Ctrl+Q quits the app.
+              // No lash: the hotkey quits the app.
               app.quit();
             }
-            return 1; // consume: Ctrl+Q never reaches the foreground app
+            return 1; // consume: the hotkey never reaches the foreground app
           }
         }
       } catch (e) { /* never let a hook error break the desktop */ }
@@ -247,7 +322,7 @@ function installKeyboardHook() {
       kbHookCbRef = null;
     }
   } catch (e) {
-    console.warn('installKeyboardHook failed (Ctrl+Q-to-drop unavailable):', e?.message || e);
+    console.warn('installKeyboardHook failed (quit hotkey unavailable):', e?.message || e);
     kbHookHandle = 0;
     kbHookCbRef = null;
   }
@@ -266,13 +341,24 @@ function uninstallKeyboardHook() {
 
 // Poll the cursor from the main process and forward it to the overlay. This is
 // safe (no system hook) and keeps the lash handle glued to the pointer.
+//
+// The poll rate deliberately does NOT try to match the display refresh rate:
+// the overlay interpolates between samples on its own requestAnimationFrame
+// clock. Polling faster just makes the newest sample fresher (and shortens the
+// interpolation delay), so this can stay well below the refresh rate.
+const CURSOR_POLL_MS = 8;
+
 function startCursorTracking() {
   stopCursorTracking();
   const tick = () => {
     if (overlay && overlay.isVisible() && !overlay.isDestroyed() && overlayReady) {
       const p = getCursorNow();
-      if (p) overlay.webContents.send('cursor', p.x - overlayOffset.x, p.y - overlayOffset.y);
-      cursorTimer = setTimeout(tick, 16);
+      // Every sample carries a timestamp. The overlay renders on a different
+      // clock than this timer, so without it the handle could only snap to the
+      // last poll — which made it advance in irregular steps and made the
+      // frame-to-frame aim velocity alternate between 0 and 2x (visible twitch).
+      if (p) overlay.webContents.send('cursor', p.x - overlayOffset.x, p.y - overlayOffset.y, Date.now());
+      cursorTimer = setTimeout(tick, CURSOR_POLL_MS);
     } else {
       cursorTimer = null;
     }
@@ -287,7 +373,7 @@ function stopCursorTracking() {
 function beginLashSession() {
   // Send the current cursor position immediately so the lash spawns under it.
   const p = getCursorNow();
-  if (p) overlay.webContents.send('cursor', p.x - overlayOffset.x, p.y - overlayOffset.y);
+  if (p) overlay.webContents.send('cursor', p.x - overlayOffset.x, p.y - overlayOffset.y, Date.now());
   startCursorTracking();
 }
 
@@ -432,17 +518,34 @@ ipcMain.on('hide-overlay', () => { if (overlay) { overlay.hide(); endLashSession
 ipcMain.handle('get-foreground-state', () => probeForegroundState());
 
 // ── Settings window + IPC ───────────────────────────────────────────────────
-ipcMain.handle('get-settings', () => settings);
+// The renderer gets the hotkey back with a ready-to-show label so it never has
+// to re-derive one from VK numbers.
+function settingsForRenderer() {
+  return { ...settings, quitHotkeyLabel: hotkeyLabel(settings.quitHotkey) };
+}
+ipcMain.handle('get-settings', () => settingsForRenderer());
+ipcMain.handle('validate-hotkey', (e, hk) => {
+  const normalized = normalizeHotkey(hk);
+  if (!normalized) return { ok: false, error: 'invalid', label: hotkeyLabel(settings.quitHotkey) };
+  return { ok: true, hotkey: normalized, label: hotkeyLabel(normalized) };
+});
+// While the settings window records a combination, the global hook must not eat
+// the very keys the user is pressing to build it.
+ipcMain.on('hotkey-capture', (e, on) => { hotkeyCapture = !!on; });
 ipcMain.handle('save-settings', (e, patch) => {
   try {
+    if (patch && patch.quitHotkey !== undefined && !normalizeHotkey(patch.quitHotkey)) {
+      return { ok: false, error: 'invalid_hotkey' };
+    }
     settings = { ...settings, ...(patch || {}) };
     if (!Array.isArray(settings.phrases) || settings.phrases.length === 0) {
       settings.phrases = DEFAULT_SETTINGS.phrases;
     }
+    settings.quitHotkey = normalizeHotkey(settings.quitHotkey) || { ...DEFAULT_QUIT_HOTKEY };
     saveSettings();
     // Refresh tray menu/tooltip immediately so language changes apply at once.
-    if (patch && (patch.language || patch.theme)) buildTrayMenu();
-    return { ok: true, settings };
+    if (patch && (patch.language || patch.theme || patch.quitHotkey)) buildTrayMenu();
+    return { ok: true, settings: settingsForRenderer() };
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -464,7 +567,10 @@ function openSettings() {
   });
   settingsWin.setMenuBarVisibility(false);
   settingsWin.loadFile('settings.html');
-  settingsWin.on('closed', () => { settingsWin = null; });
+  settingsWin.on('closed', () => {
+    settingsWin = null;
+    hotkeyCapture = false; // never leave the quit hotkey disabled
+  });
 }
 
 /** Probe the current foreground window + input method state.
@@ -612,22 +718,40 @@ function sendMacroLinux(text) {
 // ── App lifecycle ───────────────────────────────────────────────────────────
 function buildTrayMenu() {
   if (!tray) return;
-  tray.setToolTip(t('tooltip'));
+  const hk = hotkeyLabel(settings.quitHotkey);
+  tray.setToolTip(`${t('tooltip')}  |  ${hk}`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: t('settings'), click: () => openSettings() },
       { type: 'separator' },
-      { label: t('quit'), click: () => app.quit() },
+      { label: `${t('quit')}  (${hk})`, click: () => app.quit() },
     ])
   );
 }
 
+// One-off tray balloon on the first run, telling the user how to get out —
+// without it a tray-only app looks like it never started. Windows-only API.
+function showFirstRunHint() {
+  if (settings.firstRunHintDone || process.platform !== 'win32' || !tray) return;
+  try {
+    tray.displayBalloon({
+      title: t('hint_title'),
+      content: t('hint_body').replace('{hotkey}', hotkeyLabel(settings.quitHotkey)),
+    });
+  } catch (e) {
+    console.warn('first-run hint failed:', e?.message || e);
+  }
+  settings.firstRunHintDone = true;
+  saveSettings();
+}
+
 app.whenReady().then(async () => {
   loadSettings();
-  installKeyboardHook(); // Ctrl+Q: drop lash / quit app (Windows)
+  installKeyboardHook(); // quit hotkey: drop lash / quit app (Windows)
   tray = new Tray(await getTrayIcon());
   buildTrayMenu();
   tray.on('click', toggleOverlay);
+  showFirstRunHint();
 });
 
 app.on('window-all-closed', e => e.preventDefault()); // keep alive in tray

@@ -4,7 +4,7 @@
 
 Sometimes things are going too slow — and you just need to give them a nudge.
 
-一个从 [OpenWhip](https://github.com/GitFrog1111/OpenWhip) 改编的趣味工具：用一条「赛博皮鞭」抽打摸鱼的前台程序，催它快点。
+A playful tool adapted from [OpenWhip](https://github.com/GitFrog1111/OpenWhip): it cracks a "cyber whip" at the foreground program that is slacking off, and hurries it along.
 
 ## Install + run
 
@@ -13,49 +13,61 @@ npm install -g whipall
 whipall
 ```
 
-Windows 和 macOS 开箱即用；Linux 需要安装 `xdotool` 来做键盘自动化。
+Windows and macOS work out of the box; Linux needs `xdotool` for keyboard automation.
 
 ```bash
 sudo apt install xdotool
 ```
 
+Prebuilt Windows x64 builds are available on the [Releases](https://github.com/SilvusEvans/whip-all/releases) page — unzip and run `Whip-All.exe`.
+
 ## Controls
 
-- 点击托盘图标：生成鞭子。
-- 点击：放下鞭子。
-- 抽它 😩💢
-- 每次鞭打会发送一个中断（Ctrl-C），并随机输入一句催促语（例如「FASTER」）。
+- Click the tray icon: summon the whip.
+- `Ctrl+Q`: drop the whip when it is on screen, otherwise quit the app. The shortcut can be changed in Settings.
+- Crack it.
+- Each crack sends an interrupt (`Ctrl+C`) and then types a random phrase (for example "FASTER") followed by Enter.
 
-## 原理
+The app lives in the tray and has no window, so on the first launch it posts a tray notification
+with the current exit shortcut. If you miss it, the shortcut is always shown in the tray tooltip
+and in the Quit menu item.
 
-它本质上只是一个恶搞工具，不会真正改变任何程序。甩鞭子的动作会触发：
+## How it works
 
-1. 向当前前台终端发送 `Ctrl+C` 中断信号；
-2. 输入一句随机催促语并回车。
+It is a gag tool at heart; it does not actually change any program. Swinging the whip triggers:
 
-所以「变快」只是心理安慰——真正的意义是让你出一口气。😂
+1. an interrupt signal (`Ctrl+C`) to the current foreground terminal;
+2. a randomly picked hurry-up phrase, typed in and submitted with Enter.
 
-## 设置
+So "going faster" is purely psychological — the real value is blowing off steam.
 
-右键托盘图标 → 设置，可配置：
+## Settings
 
-- 语言（English / 简体 / 繁體 / 日本語）
-- 深色/浅色主题 + 主题色
-- 是否自动切英文输入法
-- 是否显示状态徽章（前台程序 + 输入法状态）
-- 自定义催促语
+Right-click the tray icon to open Settings:
 
-配置保存在 `~/.whipall.json`。
+- Language (English / Simplified Chinese / Traditional Chinese / Japanese)
+- Dark / light theme + accent color
+- Whether to switch the IME to English automatically
+- Whether to show the status badge (foreground app + IME state)
+- Exit hotkey (default `Ctrl+Q`, drop the whip when visible, quit otherwise)
+- Custom phrases
+
+Settings are stored in `~/.whipall.json`.
 
 ## Roadmap
 
-- [x] Initial release! 🥳
-- [x] 换上主题配色（纯色鞭子）
-- [x] 改名 + 重写提示语
-- [x] 设置面板（Material You 风格 + 多语言）
-- [ ] 更新鞭子物理效果
-- [ ] 记录你抽了多少次
+- [x] Initial release
+- [x] Theme colors (solid-color whip)
+- [x] Rename + rewritten phrases
+- [x] Settings panel (Material You style + multilingual)
+- [x] Configurable exit hotkey
+- [ ] Whip physics improvements
+- [ ] Count how many times you cracked
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for per-version changes.
 
 ## Credits
 
-本项目改编自 [GitFrog1111/OpenWhip](https://github.com/GitFrog1111/OpenWhip)（原 BadClaude），MIT 协议。
+Adapted from [GitFrog1111/OpenWhip](https://github.com/GitFrog1111/OpenWhip), MIT licensed.

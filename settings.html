@@ -177,6 +177,14 @@
   button.tonal:hover { filter: brightness(0.95); transform: translateY(-1px); }
   button.tonal:active { transform: scale(0.97); }
 
+  /* Exit-hotkey button: sized to its label, highlights while capturing keys */
+  button.hotkey {
+    flex: 0 0 auto; min-width: 148px; padding: 12px 16px; font-size: 13px;
+  }
+  button.hotkey.recording {
+    background: var(--md-primary-container); color: var(--md-on-primary-container);
+  }
+
   .snackbar {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: var(--snackbar-bg); color: var(--md-bg);
@@ -239,6 +247,13 @@
       </div>
       <div class="item">
         <div>
+          <div class="label" data-i18n="hotkey_label">Exit hotkey</div>
+          <div class="desc" data-i18n="hotkey_desc">Drops the lash on screen, otherwise quits. Must include Ctrl, Alt or Shift.</div>
+        </div>
+        <button class="tonal hotkey" id="hotkeyBtn" type="button">Ctrl+Q</button>
+      </div>
+      <div class="item">
+        <div>
           <div class="label" data-i18n="badge_label">Show status badge</div>
           <div class="desc" data-i18n="badge_desc">Show live foreground status and IME above the lash</div>
         </div>
@@ -271,6 +286,10 @@
       sec_behavior: 'Behavior',
       switch_eng_label: 'Auto-switch to English IME', switch_eng_desc: 'Prevent Chinese IME from garbling phrases',
       badge_label: 'Show status badge', badge_desc: 'Show live foreground status and IME above the lash',
+      hotkey_label: 'Exit hotkey', hotkey_desc: 'Drops the lash when one is on screen, otherwise quits. Must include Ctrl, Alt or Shift.',
+      hotkey_click: 'Click, then press keys', hotkey_recording: 'Press keys… (click to cancel)',
+      hotkey_need_mod: 'Add Ctrl, Alt or Shift', hotkey_unsupported: 'That key is not supported',
+      hotkey_cancel: 'Cancelled',
       sec_phrases: 'Phrases', phrases_placeholder: 'One phrase per line',
       save: 'Save', reset: 'Reset defaults',
       saved: 'Saved', save_fail: 'Save failed', reset_done: 'Defaults restored',
@@ -283,6 +302,10 @@
       sec_behavior: '行为',
       switch_eng_label: '甩鞭前自动切英文输入法', switch_eng_desc: '避免非英文输入法把催促语变成乱码',
       badge_label: '显示状态徽章', badge_desc: '在鞭子上方实时显示前台状态与输入法',
+      hotkey_label: '退出快捷键', hotkey_desc: '屏幕上有鞭子时放下鞭子，否则退出程序。必须包含 Ctrl、Alt 或 Shift。',
+      hotkey_click: '点击后按新快捷键', hotkey_recording: '请按下快捷键…（再点取消）',
+      hotkey_need_mod: '需要包含 Ctrl、Alt 或 Shift', hotkey_unsupported: '该按键不支持',
+      hotkey_cancel: '已取消',
       sec_phrases: '催促语', phrases_placeholder: '每行一句',
       save: '保存', reset: '恢复默认',
       saved: '已保存', save_fail: '保存失败', reset_done: '已恢复默认',
@@ -295,6 +318,10 @@
       sec_behavior: '行為',
       switch_eng_label: '甩鞭前自動切換英文輸入法', switch_eng_desc: '避免中文輸入法把催促語變成亂碼',
       badge_label: '顯示狀態徽章', badge_desc: '在鞭子上方即時顯示前台狀態與輸入法',
+      hotkey_label: '退出快捷鍵', hotkey_desc: '螢幕上有鞭子時放下鞭子，否則結束程式。必須包含 Ctrl、Alt 或 Shift。',
+      hotkey_click: '點擊後按新快捷鍵', hotkey_recording: '請按下快捷鍵…（再點取消）',
+      hotkey_need_mod: '需要包含 Ctrl、Alt 或 Shift', hotkey_unsupported: '該按鍵不支援',
+      hotkey_cancel: '已取消',
       sec_phrases: '催促語', phrases_placeholder: '每行一句',
       save: '儲存', reset: '恢復預設',
       saved: '已儲存', save_fail: '儲存失敗', reset_done: '已恢復預設',
@@ -307,6 +334,10 @@
       sec_behavior: '動作',
       switch_eng_label: '煽る前に英語入力に切替', switch_eng_desc: '非英語入力による文字化けを防ぐ',
       badge_label: 'ステータスバッジを表示', badge_desc: '鞭の上に前景ステータスと入力方式を表示',
+      hotkey_label: '終了ショートカットキー', hotkey_desc: '鞭が表示中なら下げ、それ以外は終了。Ctrl / Alt / Shift を必ず含めます。',
+      hotkey_click: 'クリック後に新キーを押す', hotkey_recording: 'キーを押してください…（再クリックで取消）',
+      hotkey_need_mod: 'Ctrl / Alt / Shift を組み合わせてください', hotkey_unsupported: 'このキーは使えません',
+      hotkey_cancel: '取消しました',
       sec_phrases: '煽りの言葉', phrases_placeholder: '1行に1つ',
       save: '保存', reset: 'デフォルトに戻す',
       saved: '保存しました', save_fail: '保存に失敗', reset_done: 'デフォルトに戻しました',
@@ -315,6 +346,90 @@
 
   let curLang = 'en';
   let loaded = null;
+
+  // ── Exit hotkey recorder ──────────────────────────────────────────────────
+  // Only the key label is built here; VK mapping and acceptance are decided by
+  // the main process through validate-hotkey, so the hook and this UI can never
+  // disagree about what the recorded combination means.
+  const DEFAULT_HOTKEY = { ctrl: true, alt: false, shift: false, code: 'KeyQ' };
+  const MODIFIER_CODES = new Set([
+    'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
+    'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight',
+  ]);
+  const KEY_LABELS = {
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    PageUp: 'PageUp', PageDown: 'PageDown', Escape: 'Esc', Backspace: 'Bksp',
+    Space: 'Space', Tab: 'Tab', Enter: 'Enter', NumpadEnter: 'NumEnter',
+  };
+  let curHotkey = { ...DEFAULT_HOTKEY };
+  let recording = false;
+
+  function keyLabelText(code) {
+    if (!code) return '';
+    if (KEY_LABELS[code]) return KEY_LABELS[code];
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit\d$/.test(code)) return code.slice(5);
+    if (/^Numpad\d$/.test(code)) return 'Num' + code.slice(6);
+    if (/^F\d{1,2}$/.test(code)) return code;
+    return code;
+  }
+
+  function hotkeyText(hk) {
+    return [hk.ctrl && 'Ctrl', hk.alt && 'Alt', hk.shift && 'Shift', keyLabelText(hk.code)]
+      .filter(Boolean)
+      .join('+');
+  }
+
+  function stopRecording() {
+    recording = false;
+    window.bridge.setHotkeyCapture(false);
+    const btn = $('hotkeyBtn');
+    btn.classList.remove('recording');
+    btn.textContent = hotkeyText(curHotkey);
+  }
+
+  document.addEventListener('keydown', async e => {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (MODIFIER_CODES.has(e.code)) return; // wait for the actual key of the combo
+    if (e.code === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      stopRecording();
+      showSnackbar(L().hotkey_cancel);
+      return;
+    }
+
+    const hk = { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, code: e.code };
+    const res = await window.bridge.validateHotkey(hk);
+    if (res && res.ok) {
+      curHotkey = res.hotkey;
+      const saved = await window.bridge.saveSettings({ quitHotkey: res.hotkey });
+      stopRecording();
+      showSnackbar(saved && saved.ok ? L().saved : L().save_fail);
+      return;
+    }
+    stopRecording();
+    showSnackbar(e.metaKey ? L().hotkey_unsupported : L().hotkey_need_mod);
+    if (!e.metaKey) {
+      // A modifier-less key is a mistype, not a dead end: stay armed so the user
+      // can press the real combo without clicking the button again.
+      startRecording();
+    }
+  }, true);
+
+  function startRecording() {
+    recording = true;
+    window.bridge.setHotkeyCapture(true);
+    const btn = $('hotkeyBtn');
+    btn.classList.add('recording');
+    btn.textContent = L().hotkey_recording;
+    btn.blur(); // stop the button from re-triggering on Space/Enter while capturing
+  }
+
+  $('hotkeyBtn').addEventListener('click', () => {
+    if (recording) { stopRecording(); showSnackbar(L().hotkey_cancel); return; }
+    startRecording();
+  });
 
   function applyLang(lang) {
     curLang = lang;
@@ -328,6 +443,9 @@
     document.querySelectorAll('#langSeg button').forEach(b => {
       b.classList.toggle('active', b.getAttribute('data-lang') === lang);
     });
+    const hb = $('hotkeyBtn');
+    hb.title = s.hotkey_click;
+    if (recording) hb.textContent = s.hotkey_recording;
   }
 
   function applyTheme(theme) {
@@ -399,6 +517,8 @@
     $('autoSwitchEnglish').checked = loaded.autoSwitchEnglish !== false;
     $('showStatusBadge').checked = loaded.showStatusBadge !== false;
     $('phrases').value = (loaded.phrases || []).join('\n');
+    curHotkey = loaded.quitHotkey || DEFAULT_HOTKEY;
+    if (!recording) $('hotkeyBtn').textContent = loaded.quitHotkeyLabel || hotkeyText(curHotkey);
   }
 
   function collect() {
@@ -409,6 +529,7 @@
       themeColor: curColor,
       autoSwitchEnglish: $('autoSwitchEnglish').checked,
       showStatusBadge: $('showStatusBadge').checked,
+      quitHotkey: curHotkey,
       phrases,
     };
   }
@@ -424,9 +545,10 @@
     const res = await window.bridge.saveSettings({
       autoSwitchEnglish: true,
       showStatusBadge: true,
+      quitHotkey: { ...DEFAULT_HOTKEY },
       phrases: ['FASTER', 'GO FASTER', 'Speed it up', 'Work FASTER', 'Hurry up', 'Move it', 'Pick up the pace', 'No slacking', 'Get moving', 'Step on it'],
     });
-    if (res && res.ok) { await load(); showSnackbar(L().reset_done); }
+    if (res && res.ok) { stopRecording(); await load(); showSnackbar(L().reset_done); }
   });
 
   document.querySelectorAll('#langSeg button').forEach(b => {
@@ -448,6 +570,9 @@
 
   $('autoSwitchEnglish').addEventListener('change', () => window.bridge.saveSettings(collect()));
   $('showStatusBadge').addEventListener('change', () => window.bridge.saveSettings(collect()));
+
+  // Leaving the page mid-recording must not leave the quit hotkey suspended.
+  window.addEventListener('beforeunload', () => window.bridge.setHotkeyCapture(false));
 
   load();
 </script>

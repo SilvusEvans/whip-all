@@ -28,12 +28,17 @@ const P = {
   maxStretchRatio: 1.2,  // hard cap for per-link stretch during fast cracks
 
   // Dynamic handle aim (target angle + restoring spring, not static lock)
+  // Gains are quoted in "px of mouse travel per 60 Hz frame" and are applied
+  // after a dt normalisation, so the lean feels identical on 60/120/144 Hz.
+  // Keep the clamp comfortably above a normal drag: if it saturates, the aim
+  // target flips between its extremes on consecutive frames and the handle
+  // visibly vibrates.
   baseTargetAngle: -1.12, // radians, default "up-right" resting direction
-  handleAimByMouseX: 0.4, // horizontal mouse movement influence on target angle
-  handleAimByMouseY: 0.2, // vertical mouse movement influence on target angle
-  handleAimClamp:    2.0,  // max radians target can deviate from base angle
-  handleSpring:      0.7,  // restoring force to target angle
-  handleAngularDamping: 0.078, // angular velocity damping
+  handleAimByMouseX: 0.02, // horizontal mouse movement influence on target angle
+  handleAimByMouseY: 0.01, // vertical mouse movement influence on target angle
+  handleAimClamp:   0.45, // max radians target can deviate from base angle
+  handleSpring:     0.22, // restoring force to target angle (per 60 Hz frame)
+  handleAngularDamping: 0.35, // angular velocity retention (per 60 Hz frame)
   basePoseSegments: 2,    // how many early segments are strongly guided
   basePoseStiffStart: 0.9, // stiffness near handle
   basePoseStiffEnd:   0.8, // stiffness near end of guided region
@@ -87,6 +92,7 @@ let handleAngVel = 0;
 // Live foreground window / IME state (polled from main process).
 let fgState = { className: '', title: '', procName: '', app: '', ime: 'en' };
 let lastProbe = 0;
+let lastFrameTime = 0; // previous rAF timestamp, for frame-rate independent physics
 let showStatusBadge = true; // overridden by settings
 let badgeLang = 'en';       // UI language for the status badge labels
 // Foreground-status badge labels, localized to the UI language.
@@ -113,7 +119,7 @@ const crackAudios = CRACK_SOUNDS.map(src => {
 // The overlay is click-through + fully transparent, so it can't see the mouse
 // directly. The main process feeds the cursor position (via 'cursor') and the
 // click-to-drop signal (via 'cursor-down') instead.
-window.bridge.onCursor((x, y) => { mouseX = x; mouseY = y; });
+// Cursor samples are buffered and interpolated — see "Cursor feed" below.
 window.bridge.onCursorDown(() => { if (lash && !dropping) dropping = true; });
 
 // ── Lash creation ───────────────────────────────────────────────────────────
@@ -139,6 +145,58 @@ function segLen(i) {
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+
+// ── Cursor feed (interpolated) ──────────────────────────────────────────────
+// The main process polls the pointer on its own timer; we render on
+// requestAnimationFrame. Those two clocks are unrelated, so raw samples land
+// unevenly against our frames: some frames got no new sample at all and some
+// got two. Feeding that straight into the physics made the handle advance in
+// irregular steps and made the per-frame mouse delta alternate between 0 and
+// 2x — which is what made the lash twitch while the pointer moved.
+// Instead we keep a short history of timestamped samples and interpolate the
+// position for the exact frame we are about to draw.
+const cursorSamples = [];       // { x, y, t } — oldest first
+const CURSOR_HISTORY_MS = 250;  // history kept, to ride out a stalled poll
+const CURSOR_DELAY_MIN_MS = 6;
+const CURSOR_DELAY_MAX_MS = 40;
+let cursorDelayMs = 16;         // EWMA of the observed sample interval
+
+window.bridge.onCursor((x, y, t) => {
+  const stamp = t || Date.now();
+  const prev = cursorSamples[cursorSamples.length - 1];
+  if (prev) {
+    const gap = stamp - prev.t;
+    // Track the real poll interval so the interpolation delay adapts to it.
+    if (gap > 0 && gap < 200) cursorDelayMs += (gap - cursorDelayMs) * 0.1;
+  }
+  cursorSamples.push({ x, y, t: stamp });
+  const cutoff = stamp - CURSOR_HISTORY_MS;
+  while (cursorSamples.length > 2 && cursorSamples[0].t < cutoff) cursorSamples.shift();
+});
+
+/** Cursor position at render time `now`.
+ *
+ *  We render one poll interval in the past, which guarantees two samples to
+ *  interpolate between — no extrapolation, so no overshoot when the pointer
+ *  stops or reverses. The cost is ~1 poll interval of latency, which is
+ *  imperceptible for a cursor-following effect. */
+function sampleCursor(now) {
+  const n = cursorSamples.length;
+  if (n === 0) return null;
+  if (n === 1) return cursorSamples[0];
+
+  const delay = clamp(cursorDelayMs + 2, CURSOR_DELAY_MIN_MS, CURSOR_DELAY_MAX_MS);
+  const rt = now - delay;
+
+  let i = n - 2;
+  while (i > 0 && cursorSamples[i].t > rt) i--;
+  const a = cursorSamples[i];
+  const b = cursorSamples[i + 1];
+  const span = b.t - a.t;
+  if (span <= 0) return b;
+  const alpha = clamp((rt - a.t) / span, 0, 1);
+  return { x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha };
+}
 
 /** Point on Catmull–Rom spline (extrapolated ends) for index i in `pts`. */function catmullPoint(pts, i) {
   const n = pts.length;
@@ -191,10 +249,18 @@ function playCrackSound() {
   a.play().catch(() => {});
 }
 
-function updateHandleAim() {
+/** Advance the handle's aim angle toward (baseTargetAngle + movement lean).
+ *
+ *  Everything here is quoted per 60 Hz frame and scaled by `k` (the real frame
+ *  duration in 60 Hz-frame units), so a 120/144 Hz display gets the same lean
+ *  and the same spring response as a 60 Hz one. Mouse travel arrives per frame,
+ *  so it is divided by `k` first to recover a frame-rate independent figure —
+ *  otherwise a high-refresh display would lean noticeably less. */
+function updateHandleAim(dtMs) {
   if (dropping) return;
-  const mvx = mouseX - prevMouseX;
-  const mvy = mouseY - prevMouseY;
+  const k = clamp(dtMs / 16.667, 0.25, 4); // 1 at 60 Hz
+  const mvx = (mouseX - prevMouseX) / k;
+  const mvy = (mouseY - prevMouseY) / k;
   const delta = clamp(
     mvx * P.handleAimByMouseX + mvy * P.handleAimByMouseY,
     -P.handleAimClamp,
@@ -202,9 +268,9 @@ function updateHandleAim() {
   );
   const target = P.baseTargetAngle + delta;
   const err = wrapPi(target - handleAngle);
-  handleAngVel += err * P.handleSpring;
-  handleAngVel *= P.handleAngularDamping;
-  handleAngle = wrapPi(handleAngle + handleAngVel);
+  handleAngVel += err * P.handleSpring * k;
+  handleAngVel *= Math.pow(P.handleAngularDamping, k);
+  handleAngle = wrapPi(handleAngle + handleAngVel * k);
 }
 
 function applyBasePose() {
@@ -319,11 +385,11 @@ function applyWallCollisions() {
 }
 
 // ── Physics step ────────────────────────────────────────────────────────────
-function update() {
+function update(dtMs) {
   if (!lash) return;
 
   const g = dropping ? P.dropGravity : P.gravity;
-  updateHandleAim();
+  updateHandleAim(dtMs);
 
   // Verlet integration
   const start = dropping ? 0 : 1; // if dropping, handle is free too
@@ -547,8 +613,12 @@ function badgeAccent() {
 function loop() {
   if (!lash) return; // overlay is hidden until a lash is spawned; no idle redraw
 
-  // Poll foreground window / IME state a few times per second (only while lash shown).
   const now = Date.now();
+  // Real frame duration, so the physics can stay frame-rate independent.
+  const dtMs = lastFrameTime ? clamp(now - lastFrameTime, 1, 100) : 16.667;
+  lastFrameTime = now;
+
+  // Poll foreground window / IME state a few times per second (only while lash shown).
   const pollMs = (P.statusPollMs && P.statusPollMs > 0) ? P.statusPollMs : 300;
   if (now - lastProbe > pollMs) {
     lastProbe = now;
@@ -556,7 +626,12 @@ function loop() {
       window.bridge.getForegroundState().then(s => { if (s) fgState = s; }).catch(() => {});
     } catch (e) {}
   }
-  update();
+
+  // Drive the handle from the interpolated cursor, not the last raw sample.
+  const cur = sampleCursor(now);
+  if (cur) { mouseX = cur.x; mouseY = cur.y; }
+
+  update(dtMs);
   draw();
   requestAnimationFrame(loop);
 }
@@ -608,6 +683,11 @@ window.bridge.onSpawnLash(() => {
   handleAngle = P.baseTargetAngle;
   handleAngVel = 0;
   lastProbe = 0;
+  // Drop any samples left over from a previous lash so the interpolator starts
+  // from this session's cursor stream, and restart the frame clock.
+  cursorSamples.length = 0;
+  cursorDelayMs = 16;
+  lastFrameTime = 0;
   requestAnimationFrame(loop);
 });
 
